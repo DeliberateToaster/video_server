@@ -1,0 +1,83 @@
+[project]
+name = "wanflash"
+version = "0.1.0"
+description = "WanFlash - REST-rajapinta Wan 2.2 -videogenerointiin"
+readme = "README.md"
+# 3.13 rajattu pois: torch/diffusers-wheel-kattavuus (ks. spec, Riippuvuuksien hallinta)
+requires-python = ">=3.11,<3.13"
+
+# Perusriippuvuudet: nämä riittävät koko rajapintaan mock-backendillä.
+# GPU-riippuvuudet ovat erikseen [project.optional-dependencies.gpu]:ssa, jotta
+# Vaihe 1 ja CI eivät joudu lataamaan ~3 GB torchia.
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "pillow>=10.3",
+    "imageio[ffmpeg]>=2.34",
+    # Tier-päättely tarvitsee järjestelmämuistin määrän: A14B:n CPU-offload
+    # vaatii painojen mahtumisen RAM:iin, joten pelkkä VRAM-tarkistus antaisi
+    # väärän kuvan. Tulee muuten mukana uvicorn[standard]:n kautta, mutta
+    # transitiiviseen riippuvuuteen ei sovi nojata.
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+# Ylärajat ovat tarkoituksellisia: videomallit ovat herkkiä torchin,
+# diffusersin ja transformersin yhdistelmälle. diffusers on kiinnitetty
+# tiukimmin, koska wan22-backend nojaa varmistettuihin pipeline-yksityiskohtiin
+# (callbackin sopimus, guidance_scale_2:n virhekäyttäytyminen, boundary_ratio
+# ja expand_timesteps configissa) - ne voivat muuttua minor-versiossa.
+# Tarkat todennetut versiot ovat uv.lockissa; nämä ilmaisevat yhteensopivuuden.
+gpu = [
+    "torch>=2.9,<3",
+    "torchvision",
+    "diffusers>=0.40,<0.41",
+    "transformers>=4.45,<6",
+    "accelerate>=1.0,<2",
+    "safetensors",
+    "huggingface-hub",
+    "ftfy",
+]
+# 4-bit-kvantisointi low-tierille. Erillinen extra, koska bitsandbytes on
+# alustakohtainen eikä sitä tarvita mid- tai high-tierillä.
+quantized = [
+    "bitsandbytes>=0.43",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+    "ruff>=0.6",
+]
+
+# Windowsin PyPI-torch on CPU-only. CUDA-buildit tulevat PyTorchin omasta
+# indeksistä. cu126 valittu koska sillä on laajin win/cp312-wheel-matriisi
+# ja RTX 3090 (sm_86, Ampere) on siinä täysin tuettu.
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["video_server"]

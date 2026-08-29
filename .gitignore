@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Ajonaikainen konfiguraatio: .env.example on versioitu, .env ei
+.env
+config.yaml
+
+# Generoidut videot ja niiden sidecar-metadata
+video_server/outputs/*
+!video_server/outputs/.gitkeep
+
+# Mallien painot eivät kuulu repoon (kymmeniä gigatavuja)
+models/
+*.safetensors
+*.gguf

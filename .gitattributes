@@ -1,0 +1,14 @@
+# Rivinvaihdot normalisoidaan repossa LF:ksi.
+* text=auto
+
+# Shell-skriptit VAATIVAT LF:n. CRLF-rivinvaihdolla Linux tulkitsee
+# shebang-rivin muodossa "/usr/bin/env bash\r" ja kaatuu virheeseen
+# "bad interpreter" - juuri se skripti jonka on tarkoitus toimia
+# vieraalla koneella olisi rikki.
+*.sh text eol=lf
+
+# PowerShell-skriptit pidetään Windows-rivinvaihdoilla.
+*.ps1 text eol=crlf
+
+# Lukitustiedostoa ei kannata diffata käsin.
+uv.lock linguist-generated=true
