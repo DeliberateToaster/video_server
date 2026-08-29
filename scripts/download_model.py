@@ -1,9 +1,9 @@
-"""Lataa valitun profiilin painot HuggingFacesta paikalliseen cacheen.
+"""Download the selected profile weights from HuggingFace into the local cache.
 
-Ajo:
-    uv run python scripts/download_model.py                    # oletusprofiili
+Usage:
+    uv run python scripts/download_model.py                    # default profile
     uv run python scripts/download_model.py wan2.2-t2v-a14b
-    uv run python scripts/download_model.py --check            # onko jo levyllä
+    uv run python scripts/download_model.py --check            # already on disk?
 
 Lataus on tarkoituksella eksplisiittinen eikä tapahdu palvelimen
 käynnistyksessä: kymmenien gigatavujen hiljainen lataus ensimmäisen API-kutsun
@@ -41,12 +41,12 @@ def download_with_retries(repo_id: str, attempts: int = 6) -> str:
         except (RuntimeError, OSError) as exc:
             if attempt == attempts:
                 raise
-            print(f"\nLataus katkesi: {exc.__class__.__name__}: {exc}")
-            print(f"Yritys {attempt}/{attempts}. Jatketaan {delay} s kuluttua siitä")
-            print("mihin lataus jäi (valmiit tiedostot säilyvät).\n")
+            print(f"\nDownload interrupted: {exc.__class__.__name__}: {exc}")
+            print(f"Attempt {attempt}/{attempts}. Resuming in {delay} s from where")
+            print("the download stopped (completed files are kept).\n")
             time.sleep(delay)
             delay = min(delay * 2, 60)
-    raise AssertionError("saavuttamaton")
+    raise AssertionError("unreachable")
 
 
 def main() -> int:
@@ -56,12 +56,12 @@ def main() -> int:
         nargs="?",
         default=DEFAULT_PROFILE,
         choices=DOWNLOADABLE,
-        help=f"ladattava malliprofiili (oletus: {DEFAULT_PROFILE})",
+        help=f"model profile to download (default: {DEFAULT_PROFILE})",
     )
     parser.add_argument(
         "--check",
         action="store_true",
-        help="tarkista vain onko malli jo paikallisessa cachessa, älä lataa",
+        help="only check whether the model is already cached, do not download",
     )
     args = parser.parse_args()
 
@@ -70,7 +70,7 @@ def main() -> int:
         from huggingface_hub import snapshot_download
     except ImportError:
         print(
-            "huggingface_hub puuttuu. Asenna GPU-riippuvuudet: uv sync --extra gpu",
+            "huggingface_hub is missing. Install GPU dependencies: uv sync --extra gpu",
             file=sys.stderr,
         )
         return 2
@@ -79,16 +79,16 @@ def main() -> int:
         try:
             path = snapshot_download(profile.repo_id, local_files_only=True)
         except OSError as exc:  # LocalEntryNotFoundError periytyy OSErrorista
-            print(f"{profile.name}: EI paikallisessa cachessa ({exc.__class__.__name__})")
+            print(f"{profile.name}: NOT in the local cache ({exc.__class__.__name__})")
             return 1
-        print(f"{profile.name}: löytyy hakemistosta {path}")
+        print(f"{profile.name}: found in {path}")
         return 0
 
-    print(f"Ladataan {profile.name} ({profile.repo_id})")
-    print("Tämä on useiden gigatavujen lataus ja voi kestää kauan.")
+    print(f"Downloading {profile.name} ({profile.repo_id})")
+    print("This is a multi-gigabyte download and may take a long time.")
     path = download_with_retries(profile.repo_id)
-    print(f"\nValmis: {path}")
-    print(f"Käynnistä palvelin asetuksella VIDEO_SERVER_BACKEND={profile.name}")
+    print(f"\nDone: {path}")
+    print(f"Start the server with VIDEO_SERVER_BACKEND={profile.name}")
     return 0
 
 

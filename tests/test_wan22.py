@@ -216,7 +216,7 @@ def test_invalid_base64_gives_clear_error() -> None:
 
 def test_valid_base64_that_is_not_an_image_gives_clear_error() -> None:
     payload = base64.b64encode(b"tama ei ole kuva").decode()
-    with pytest.raises(ValueError, match="kuva"):
+    with pytest.raises(ValueError, match="image"):
         Wan22Backend._decode_image(payload, 32, 32)
 
 
@@ -272,7 +272,7 @@ def test_insufficient_vram_falls_back_to_offload(monkeypatch) -> None:
 
     mode, reason = backend._resolve_load_mode()
     assert mode == "offload"
-    assert "alittaa" in reason
+    assert "is below" in reason
 
 
 def test_sufficient_vram_keeps_bf16(monkeypatch) -> None:

@@ -1,19 +1,19 @@
 # WanFlash
 
-REST-rajapinta Wan 2.2 -videogenerointiin. Yksi malli residenttinä muistissa,
-yksi generointi kerrallaan, asynkroninen job-malli.
+A REST API for Wan 2.2 video generation. One model resident in VRAM, one
+generation at a time, asynchronous job model.
 
-Tekninen spesifikaatio: [docs/spec.md](docs/spec.md).
+Technical specification (in Finnish): [docs/spec.md](docs/spec.md).
 
-## Asennus
+## Installation
 
-Nopein tapa on bootstrap-skripti: se asentaa uv:n jos se puuttuu, asentaa
-riippuvuudet, luo `.env`:n, tarkistaa laitteiston ja ajaa testit. Python 3.12
-tulee uv:n mukana, joten erillistä Python-asennusta ei tarvita.
+The quickest route is the bootstrap script: it installs uv if missing, installs
+dependencies, creates `.env`, checks the hardware and runs the test suite.
+Python 3.12 comes with uv, so no separate Python install is needed.
 
 ```powershell
-# Windows. -ExecutionPolicy Bypass tarvitaan jos koneen suorituskäytäntö
-# estää allekirjoittamattomat skriptit.
+# Windows. -ExecutionPolicy Bypass is needed if the machine blocks
+# unsigned scripts.
 powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
 ```
 
@@ -22,160 +22,170 @@ powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
 bash scripts/bootstrap.sh
 ```
 
-Valinnat (molemmissa): `-Weights` / `--weights` lataa myös mallin painot
-(~32 GB), `-Minimal` / `--minimal` asentaa vain rajapinnan riippuvuudet ilman
-torchia, `-SkipTests` / `--skip-tests` ohittaa testiajon.
+Options (both scripts): `-Weights` / `--weights` also downloads the model
+weights (~32 GB), `-Minimal` / `--minimal` installs only the API dependencies
+without torch, `-SkipTests` / `--skip-tests` skips the test run.
 
-Skripti on idempotentti: sen voi ajaa uudelleen turvallisesti, eikä se
-ylikirjoita olemassa olevaa `.env`-tiedostoa.
+The script is idempotent: it is safe to re-run and will not overwrite an
+existing `.env`.
 
-### Käsin
+### Manual
 
-Vaatii [uv](https://docs.astral.sh/uv/):n. Python 3.12 asennetaan automaattisesti.
+Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is installed automatically.
 
 ```powershell
-# Rajapinta + kehitystyökalut, ei GPU-riippuvuuksia (~50 MB).
-# Tällä ajetaan mock-backend ja koko testisetti.
+# API + development tools, no GPU dependencies (~50 MB).
+# This is enough to run the mock backend and the whole test suite.
 uv sync --group dev
 
-# GPU-riippuvuudet (torch + diffusers, ~3 GB). Tarvitaan vasta oikeaan
-# inferenssiin, ei rajapinnan kehitykseen.
+# GPU dependencies (torch + diffusers, ~3 GB). Only needed for real
+# inference, not for working on the API.
 uv sync --extra gpu --group dev
 
-# Vain low-tierille (4-bit-kvantisointi, 12-20 GB VRAM):
+# Only for the low tier (4-bit quantisation, 12-20 GB VRAM):
 # uv sync --extra gpu --extra quantized --group dev
 
-# Tarkista onko kone valmis oikeaan inferenssiin (GPU, CUDA, ffmpeg, tier)
+# Check whether the machine is ready for real inference (GPU, CUDA, ffmpeg, tier)
 uv run python scripts/check_env.py
 ```
 
-Riippuvuusjako on tarkoituksellinen: koko rajapinta, jono ja testit toimivat
-ilman GPU:ta ja ilman torchia. Vain `backends/wan22.py` tarvitsee `gpu`-extran.
+The dependency split is deliberate: the entire API, queue and test suite run
+without a GPU and without torch. Only `backends/wan22.py` needs the `gpu` extra.
 
-## Mallin painot
+## Model weights
 
-Palvelin **ei** lataa painoja itse. Puuttuvista painoista tulee selkeä virhe,
-joka kertoo komennon - kymmenien gigatavujen hiljainen lataus ensimmäisen
-API-kutsun yhteydessä olisi huono oletus.
+The server does **not** download weights by itself. Missing weights produce a
+clear error naming the command to run - silently pulling tens of gigabytes on
+the first API call would be a poor default.
 
 ```powershell
-# Oletusmalli TI2V-5B. Huom: 31,9 GB levytilaa (repo sisältää fp32-painot).
-# VRAM-tarve ajossa on ~10 GB - levytila ja VRAM ovat eri asia.
+# Default model TI2V-5B. Note: 31.9 GB of disk space (the repo ships
+# fp32 weights). Runtime VRAM usage is about 23 GB - disk size and VRAM
+# are two different things.
 uv run python scripts/download_model.py wan2.2-ti2v-5b
 
-# Onko jo ladattu?
+# Already downloaded?
 uv run python scripts/download_model.py --check
 ```
 
-Saatavilla olevat profiilit: `wan2.2-ti2v-5b` (oletus), `wan2.2-t2v-a14b`,
-`wan2.2-i2v-a14b`. A14B on MoE-malli, jonka painot ovat bf16:na ~54 GB - se ei
-mahdu 24 GB:n kortille edes CPU-offloadilla ilman ~60 GB järjestelmämuistia.
+Available profiles: `wan2.2-ti2v-5b` (default), `wan2.2-t2v-a14b`,
+`wan2.2-i2v-a14b`. A14B is a MoE model whose weights are ~54 GB in bf16 - it
+does not fit a 24 GB card even with CPU offload unless the machine has ~60 GB
+of system RAM.
 
-## Laitteisto ja tier
+## Hardware and tiers
 
-Oletuksena `VIDEO_SERVER_BACKEND=auto`: palvelin tunnistaa VRAM:n ja
-järjestelmämuistin, päättelee tierin ja valitsee sen mukaan sekä mallin että
-lataustavan. Valinta ja sen perustelu logitetaan käynnistyksessä.
+By default `VIDEO_SERVER_BACKEND=auto`: the server detects VRAM and system
+memory, derives a tier, and uses it to pick both the model and the loading
+mode. The choice and its reasoning are logged at startup.
 
-| Tier | VRAM | Malli ja lataustapa |
+| Tier | VRAM | Model and loading mode |
 |---|---|---|
-| `low` | 12-20 GB | TI2V-5B 4-bit-kvantisoituna (vaatii `quantized`-extran, testäämaton) |
+| `low` | 12-20 GB | TI2V-5B 4-bit quantised (needs the `quantized` extra, untested) |
 | `mid` | 20-30 GB | TI2V-5B bf16 |
 | `high` | 30 GB+ | A14B bf16 |
-| `a14b-offload` | 24 GB + ~60 GB RAM | A14B CPU-offloadilla, hidas |
+| `a14b-offload` | 24 GB + ~60 GB RAM | A14B with CPU offload, slow |
 
-Eksplisiittinen `VIDEO_SERVER_BACKEND` ohittaa automaattivalinnan aina. Jos
-tierille ei löydy mallia (ei CUDAa tai liian pieni kortti), palvelin kaatuu
-ohjeen kanssa sen sijaan että putoaisi hiljaa mock-backendiin ja tuottaisi
-väärennettyä videota.
+An explicit `VIDEO_SERVER_BACKEND` always overrides the automatic choice. If no
+model fits the detected tier (no CUDA, or a card that is too small), the server
+fails with instructions rather than silently falling back to the mock backend
+and serving fabricated video.
 
-RTX 3090 (24 GB) osuu mid-tieriin: TI2V-5B bf16, ~23 GB VRAM ajossa.
+An RTX 3090 (24 GB) lands in the mid tier: TI2V-5B bf16, ~23 GB VRAM in use.
 
-## Ajaminen
+## Running
 
 ```powershell
 uv run uvicorn video_server.main:app --reload
 
-# Kehitys ilman GPU:ta ja ilman painoja:
+# Development without a GPU and without weights:
 $env:VIDEO_SERVER_BACKEND = "mock"; uv run uvicorn video_server.main:app --reload
 ```
 
-Palvelin avaa portin heti, mutta generointi-endpointit vastaavat `503` kunnes
-malli on latautunut. Tila: `GET /api/v1/health`.
+The server opens its port immediately, but generation endpoints return `503`
+until the model has loaded. Check with `GET /api/v1/health`.
 
-Konfiguraatio: kopioi [.env.example](.env.example) nimelle `.env`. Kaikki
-asetukset toimivat myös ympäristömuuttujina tai `config.yaml`:n kautta.
+Configuration: copy [.env.example](.env.example) to `.env`. Every setting also
+works as an environment variable or via `config.yaml`.
 
-## Esimerkki
+## Example
 
 ```powershell
-# Aloita generointi
+# Start a generation
 curl -X POST http://127.0.0.1:8000/api/v1/txt2vid `
   -H "Content-Type: application/json" `
-  -d '{\"prompt\":\"kissa kävelee rannalla\",\"num_frames\":81}'
+  -d '{\"prompt\":\"a cat walking on a beach\",\"num_frames\":81}'
 
-# Pollaa tilaa (job_id edellisestä vastauksesta)
+# Poll the status (job_id from the previous response)
 curl http://127.0.0.1:8000/api/v1/jobs/<job_id>
 
-# Valmis video löytyy vastauksen video_url-kentästä
+# The finished video is in the video_url field of the response
 ```
 
-Mitä palvelin sallii milläkin mallilla, selviää kysymättä arvailua:
-`GET /api/v1/models` kertoo aktiivisen mallin sallitut resoluutiot,
-frame-säännön ja natiivin fps:n.
+No guessing is needed about what the server accepts for a given model:
+`GET /api/v1/models` reports the active model's allowed resolutions, frame
+rule and native fps.
 
-## Valinnaiset laajennukset
+## Optional extensions
 
-Molemmat ovat oletuksena pois päältä, eivätkä muuta palvelimen käyttäytymistä
-ellei niitä erikseen kytke.
+Both are off by default and do not change the server's behaviour unless you
+explicitly enable them.
 
-**Esikatselukuvat.** `VIDEO_SERVER_PREVIEW_EVERY_N_STEPS=5` dekoodaa yhden
-framen joka viides askel, ja job-vastaus saa `preview_url`-kentän. Maksaa
-yhden ylimääräisen VAE-kutsun per kuva. Jos dekoodaus epäonnistuu (esimerkiksi
-muistin loppuessa), generointi jatkuu normaalisti ja lokiin tulee varoitus.
+**Preview frames.** `VIDEO_SERVER_PREVIEW_EVERY_N_STEPS=5` decodes one frame
+every fifth step and adds a `preview_url` field to the job response. Costs one
+extra VAE call per image. If decoding fails (for example when memory runs out),
+generation continues normally and a warning is logged.
 
-**API-avain.** `VIDEO_SERVER_API_KEY=...` vaatii `X-API-Key`-otsakkeen
-poluilla `/api/v1` ja `/outputs`. Myös valmiit videot ovat suojattuja, koska ne
-ovat se varsinainen suojattava sisältö. `/api/v1/health` jää auki, jotta
-monitorointi toimii ilman avainta.
+**API key.** `VIDEO_SERVER_API_KEY=...` requires an `X-API-Key` header on
+`/api/v1` and `/outputs`. Finished videos are protected too, since they are the
+actual sensitive content. `/api/v1/health` stays open so monitoring works
+without the key.
 
 ```powershell
-curl http://127.0.0.1:8000/api/v1/models -H "X-API-Key: salainen-avain"
+curl http://127.0.0.1:8000/api/v1/models -H "X-API-Key: your-secret-key"
 ```
 
-## Testit
+## Tests
 
 ```powershell
-uv run pytest          # koko setti, ei vaadi GPU:ta eikä painoja
+uv run pytest          # full suite, needs no GPU and no weights
 uv run ruff check .
 ```
 
-## Tyypilliset virheet
+## Common errors
 
-| Oire | Syy | Korjaus |
+| Symptom | Cause | Fix |
 |---|---|---|
-| `WeightsMissingError: mallin ... painoja ei löydy` | Painoja ei ole ladattu | `uv run python scripts/download_model.py` |
-| `CAS Client Error: ... error decoding response body` | HuggingFacen Xet-siirto katkesi kesken latauksen | Skripti yrittää nyt automaattisesti uudelleen ja jatkaa siitä mihin jäi. Jos yritykset loppuvat, aja komento uudelleen - valmiit tiedostot säilyvät |
-| `ModuleNotFoundError: No module named torch` | GPU-riippuvuuksia ei ole asennettu | `uv sync --extra gpu --group dev` |
-| `503` generointipyyntöön | Malli latautuu vielä (kestää minuutteja) | Odota; `GET /api/v1/health` kertoo tilan |
-| `400 num_frames ... vaaditaan n * 4 + 1` | Frame-määrä ei kelpaa mallin VAE:lle | Käytä virheviestin ehdottamaa lähintä arvoa |
-| `torch.OutOfMemoryError` / CUDA OOM | Malli ei mahdu VRAM:iin | `VIDEO_SERVER_CPU_OFFLOAD=true`, pienempi resoluutio tai vähemmän frameja |
-| `ValueError: guidance_scale_2 is only supported when ... boundary_ratio is not None` | Kaksoisguidance yhden asiantuntijan mallille | Ei pitäisi tapahtua: profiilin `has_second_expert` estää tämän. Jos tapahtuu, profiili on väärin |
-| Palvelin vastaa `429` | Jono on täynnä | Odota tai kasvata `VIDEO_SERVER_MAX_QUEUE_SIZE` |
+| `WeightsMissingError` on startup | Weights have not been downloaded | `uv run python scripts/download_model.py` |
+| `CAS Client Error: ... error decoding response body` | HuggingFace Xet transfer dropped mid-download | The script retries automatically and resumes where it stopped. If the retries run out, run the command again - completed files are kept |
+| `ModuleNotFoundError: No module named torch` | GPU dependencies are not installed | `uv sync --extra gpu --group dev` |
+| `503` on a generation request | The model is still loading (takes minutes) | Wait; `GET /api/v1/health` reports the state |
+| `400` mentioning `num_frames` and `n * 4 + 1` | The frame count is invalid for the model's VAE | Use one of the nearest valid values the error suggests |
+| `torch.OutOfMemoryError` / CUDA OOM | The model does not fit in VRAM | `VIDEO_SERVER_CPU_OFFLOAD=true`, a smaller resolution, or fewer frames |
+| `ValueError: guidance_scale_2 is only supported when ... boundary_ratio is not None` | Dual guidance passed to a single-expert model | Should not happen: the profile's `has_second_expert` prevents it. If it does, the profile is wrong |
+| Server responds `429` | The queue is full | Wait, or raise `VIDEO_SERVER_MAX_QUEUE_SIZE` |
 
-## Tila
+## Status
 
-Vaiheet 0-4 valmiit: ympäristö, rajapinta mock-backendillä, Wan-backend,
-tier-automatiikka sekä valinnaiset esikatselukuvat ja API-avain. Todennettu
-oikealla ajolla (RTX 3090, 1280x704). Kaikki speksin vaiheet on käyty läpi.
+Phases 0-4 complete: environment, the API on the mock backend, the Wan backend,
+tier automation, plus optional preview frames and API key. Verified with a real
+run (RTX 3090, 1280x704). Every phase of the specification has been worked
+through.
 
-## Tunnetut rajoitteet
+## Known limitations
 
-- Ei ROCm (AMD) -tukea. Vain CUDA.
-- Autentikointi on oletuksena pois. Jos palvelin altistetaan verkkoon, aseta
+- No ROCm (AMD) support. CUDA only.
+- Authentication is off by default. If the server is exposed to a network, set
   `VIDEO_SERVER_API_KEY`.
-- Ei rinnakkaisia ajoja: yksi malli ja yksi generointi kerrallaan.
-- Etenemistiedon `phase`-kenttä erottaa denoising- ja dekoodausvaiheet.
-  Dekoodauksen kestoa ei voi arvioida, joten `eta_seconds` on silloin `null`.
-- Job-tila on muistissa; valmiit videot säilyvät levyllä sidecar-metadatan
-  kanssa, joten uudelleenkäynnistys ei hukkaa valmiita tuloksia.
+- No concurrent runs: one model and one generation at a time.
+- The `phase` field in progress distinguishes the denoising and decoding
+  stages. Decoding duration cannot be estimated, so `eta_seconds` is `null`
+  during it.
+- Job state lives in memory; finished videos persist on disk with sidecar
+  metadata, so a restart does not lose completed results.
+
+## A note on language
+
+User-facing documentation, configuration comments and script output are in
+English. Code comments and the technical specification remain in Finnish,
+reflecting how the project was designed and reasoned about.

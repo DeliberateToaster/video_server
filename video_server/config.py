@@ -192,25 +192,25 @@ TIERS: dict[str, TierPolicy] = {
         name="low",
         profile="wan2.2-ti2v-5b",
         load_mode="quantized",
-        note="12-20 GB VRAM: 4-bit-kvantisoitu transformer",
+        note="12-20 GB VRAM: 4-bit quantised transformer",
     ),
     "mid": TierPolicy(
         name="mid",
         profile="wan2.2-ti2v-5b",
         load_mode="bf16",
-        note="20-30 GB VRAM: TI2V-5B täydellä bf16-tarkkuudella",
+        note="20-30 GB VRAM: TI2V-5B at full bf16 precision",
     ),
     "high": TierPolicy(
         name="high",
         profile="wan2.2-t2v-a14b",
         load_mode="bf16",
-        note="30 GB+ VRAM: A14B molemmat asiantuntijat residenttinä",
+        note="30 GB+ VRAM: A14B with both experts resident",
     ),
     "a14b-offload": TierPolicy(
         name="a14b-offload",
         profile="wan2.2-t2v-a14b",
         load_mode="offload",
-        note="24 GB VRAM + ~60 GB RAM: A14B CPU-offloadilla, hidas",
+        note="24 GB VRAM + ~60 GB RAM: A14B with CPU offload, slow",
     ),
 }
 
@@ -225,23 +225,23 @@ def suggest_tier(vram_gib: float, system_ram_gib: float | None) -> tuple[str, st
     painojen mahtumisen RAM:iin, joten pelkkä VRAM-tarkistus antaisi liian
     ruusuisen kuvan siitä mitä kone pystyy ajamaan.
     """
-    ram_txt = "tuntematon" if system_ram_gib is None else f"{system_ram_gib:.0f} GB"
+    ram_txt = "unknown" if system_ram_gib is None else f"{system_ram_gib:.0f} GB"
 
     if vram_gib >= 30:
-        return "high", f"{vram_gib:.0f} GB VRAM riittää A14B:lle bf16-tarkkuudella"
+        return "high", f"{vram_gib:.0f} GB VRAM is enough for A14B at bf16"
     if vram_gib >= 20:
         if system_ram_gib is not None and system_ram_gib >= 60:
             return "mid", (
-                f"{vram_gib:.0f} GB VRAM + {ram_txt} RAM: TI2V-5B natiivisti, "
-                "A14B mahdollinen offload-tilassa"
+                f"{vram_gib:.0f} GB VRAM + {ram_txt} RAM: TI2V-5B natively, "
+                "A14B possible with offload"
             )
         return "mid", (
-            f"{vram_gib:.0f} GB VRAM: TI2V-5B bf16. A14B-offload ei onnistu "
-            f"(vaatii ~60 GB RAM, koneessa {ram_txt})"
+            f"{vram_gib:.0f} GB VRAM: TI2V-5B bf16. A14B offload will not fit "
+            f"(needs ~60 GB RAM, machine has {ram_txt})"
         )
     if vram_gib >= 11:
-        return "low", f"{vram_gib:.0f} GB VRAM: TI2V-5B kvantisoituna, CPU-offload sallittu"
-    return "unsupported", f"{vram_gib:.0f} GB VRAM on liian vähän Wan 2.2:lle"
+        return "low", f"{vram_gib:.0f} GB VRAM: TI2V-5B quantised, CPU offload allowed"
+    return "unsupported", f"{vram_gib:.0f} GB VRAM is too little for Wan 2.2"
 
 
 def parse_resolution(resolution: str) -> tuple[int, int]:

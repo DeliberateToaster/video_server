@@ -72,7 +72,7 @@ class Wan22Backend(VideoBackend):
         pipeline_cls = WanPipeline if self._profile.supports_t2v else WanImageToVideoPipeline
 
         logger.info(
-            "ladataan %s (%s, dtype=%s, local_files_only=%s)",
+            "loading %s (%s, dtype=%s, local_files_only=%s)",
             self._profile.name,
             repo,
             self._settings.dtype,
@@ -80,7 +80,7 @@ class Wan22Backend(VideoBackend):
         )
 
         mode, reason = self._resolve_load_mode()
-        logger.info("lataustapa=%s (%s)", mode, reason)
+        logger.info("load mode=%s (%s)", mode, reason)
 
         try:
             # VAE erikseen float32:na: Wanin VAE on numeerisesti herkkä, ja
@@ -105,9 +105,9 @@ class Wan22Backend(VideoBackend):
         except OSError as exc:
             if local_only:
                 raise WeightsMissingError(
-                    f"mallin {repo} painoja ei löydy paikallisesta cachesta. "
-                    f"Lataa ne komennolla: uv run python scripts/download_model.py "
-                    f"{self._profile.name}  (tai salli automaattilataus asetuksella "
+                    f"weights for {repo} were not found in the local cache. "
+                    f"Download them with: uv run python scripts/download_model.py "
+                    f"{self._profile.name}  (or allow automatic download by setting "
                     f"VIDEO_SERVER_ALLOW_DOWNLOAD=true)"
                 ) from exc
             raise
@@ -132,14 +132,14 @@ class Wan22Backend(VideoBackend):
         self._pipe = pipe
         self._scheduler_config = dict(pipe.scheduler.config)
         self._sync_profile_from_checkpoint(pipe)
-        logger.info("malli %s ladattu (lataustapa=%s)", self._profile.name, mode)
+        logger.info("model %s loaded (load mode=%s)", self._profile.name, mode)
 
     def _torch_dtype(self) -> Any:
         import torch
 
         dtype = getattr(torch, self._settings.dtype, None)
         if dtype is None:
-            raise ValueError(f"tuntematon dtype {self._settings.dtype!r}")
+            raise ValueError(f"unknown dtype {self._settings.dtype!r}")
         return dtype
 
     def _vram_gib(self) -> float | None:
@@ -168,8 +168,8 @@ class Wan22Backend(VideoBackend):
         vram = self._vram_gib()
         if vram is not None and vram < self._profile.min_vram_gib:
             return "offload", (
-                f"VRAM {vram:.1f} GB alittaa profiilin {self._profile.name} vaatimuksen "
-                f"{self._profile.min_vram_gib:.0f} GB (ohittaa: {reason})"
+                f"VRAM {vram:.1f} GB is below the {self._profile.name} requirement of "
+                f"{self._profile.min_vram_gib:.0f} GB (overrides: {reason})"
             )
         return mode, reason
 
@@ -188,12 +188,12 @@ class Wan22Backend(VideoBackend):
             import bitsandbytes  # noqa: F401
         except ImportError:
             raise RuntimeError(
-                "quantized-lataustapa vaatii bitsandbytes-paketin: "
-                "uv sync --extra gpu --extra quantized. Vaihtoehtoisesti pakota "
-                "toinen lataustapa asetuksella VIDEO_SERVER_CPU_OFFLOAD=true."
+                "the quantized load mode requires the bitsandbytes package: "
+                "uv sync --extra gpu --extra quantized. Alternatively force a "
+                "different load mode with VIDEO_SERVER_CPU_OFFLOAD=true."
             ) from None
 
-        logger.info("ladataan transformer 4-bit-kvantisoituna (nf4)")
+        logger.info("loading transformer 4-bit quantised (nf4)")
         return WanTransformer3DModel.from_pretrained(
             repo,
             subfolder="transformer",
@@ -231,7 +231,7 @@ class Wan22Backend(VideoBackend):
             shift = float(pipe.scheduler.config.get("flow_shift", self._profile.default_shift))
             if shift != self._profile.default_shift:
                 logger.info(
-                    "default_shift %s -> %s (schedulerin flow_shift)",
+                    "default_shift %s -> %s (scheduler flow_shift)",
                     self._profile.default_shift,
                     shift,
                 )
@@ -251,7 +251,7 @@ class Wan22Backend(VideoBackend):
         import torch
 
         if self._pipe is None:
-            raise RuntimeError("Wan22Backend.load() kutsumatta")
+            raise RuntimeError("Wan22Backend.load() was not called")
 
         pipe = self._pipeline_for(params.mode)
         self._apply_shift(pipe, params.shift)
@@ -342,7 +342,7 @@ class Wan22Backend(VideoBackend):
             frames[0][0].save(path)
             return path
         except (RuntimeError, ValueError, OSError, IndexError, AttributeError) as exc:
-            logger.warning("esikatselukuvan dekoodaus epäonnistui, jatketaan: %s", exc)
+            logger.warning("preview decode failed, continuing: %s", exc)
             return None
 
     def _pipeline_for(self, mode: str) -> Any:
@@ -383,7 +383,7 @@ class Wan22Backend(VideoBackend):
         from PIL import Image
 
         if not data:
-            raise ValueError("i2v-generointi vaatii init_image-kentän")
+            raise ValueError("i2v generation requires the init_image field")
 
         # Speksi sanoo ilman data-URI-prefiksiä, mutta sen mukaan lähettäminen on
         # yleinen asiakasvirhe eikä sen hylkääminen hyödytä ketään.
@@ -393,12 +393,12 @@ class Wan22Backend(VideoBackend):
         try:
             raw = base64.b64decode(data, validate=True)
         except (binascii.Error, ValueError) as exc:
-            raise ValueError(f"init_image ei ole kelvollista base64-dataa: {exc}") from None
+            raise ValueError(f"init_image is not valid base64 data: {exc}") from None
 
         try:
             image = Image.open(io.BytesIO(raw))
             image.load()
         except OSError as exc:
-            raise ValueError(f"init_image ei ole tunnistettava kuva: {exc}") from None
+            raise ValueError(f"init_image is not a recognisable image: {exc}") from None
 
         return image.convert("RGB").resize((width, height), Image.LANCZOS)

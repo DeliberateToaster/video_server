@@ -143,7 +143,7 @@ class JobStore:
             self._queue.put_nowait(job.id)
         except asyncio.QueueFull:
             raise QueueFullError(
-                f"jono on täynnä ({self._settings.max_queue_size} työtä); yritä myöhemmin"
+                f"queue is full ({self._settings.max_queue_size} jobs); try again later"
             ) from None
         self._jobs[job.id] = job
         return job
@@ -154,7 +154,7 @@ class JobStore:
     def cancel(self, job_id: str) -> Job:
         job = self._jobs[job_id]
         if job.status in TERMINAL_STATUSES:
-            raise JobConflictError(f"työ on jo tilassa {job.status.value}")
+            raise JobConflictError(f"job is already in state {job.status.value}")
         if job.status is JobStatus.QUEUED:
             # Jonossa olevaa ei tarvitse poistaa jonosta: worker ohittaa sen.
             job.status = JobStatus.CANCELLED
@@ -178,16 +178,16 @@ class JobStore:
                     output = await loop.run_in_executor(None, self._run, job, loop)
                 except GenerationCancelled:
                     job.status = JobStatus.CANCELLED
-                    logger.info("job %s peruttu", job.id)
+                    logger.info("job %s cancelled", job.id)
                 except Exception as exc:  # virhe kuuluu jobiin, ei kaada workeria
                     job.status = JobStatus.FAILED
                     job.error = f"{exc.__class__.__name__}: {exc}"
-                    logger.exception("job %s epäonnistui", job.id)
+                    logger.exception("job %s failed", job.id)
                 else:
                     job.output_path = output
                     job.status = JobStatus.DONE
                     job.eta_seconds = 0.0
-                    logger.info("job %s valmis: %s", job.id, output.name)
+                    logger.info("job %s done: %s", job.id, output.name)
                 self._write_sidecar(job)
                 self.sweep_retention()
             finally:
@@ -246,7 +246,7 @@ class JobStore:
                 json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
             )
         except OSError:
-            logger.warning("sidecar-kirjoitus epäonnistui jobille %s", job.id, exc_info=True)
+            logger.warning("sidecar write failed for job %s", job.id, exc_info=True)
 
     def _load_sidecars(self) -> None:
         for path in sorted(self.outputs_dir.glob("*.json")):
@@ -260,7 +260,7 @@ class JobStore:
                     error=payload.get("error"),
                 )
             except (OSError, KeyError, ValueError) as exc:
-                logger.warning("ohitetaan viallinen sidecar %s: %s", path.name, exc)
+                logger.warning("skipping malformed sidecar %s: %s", path.name, exc)
                 continue
 
             video = self.outputs_dir / payload["video"] if payload.get("video") else None
@@ -274,7 +274,7 @@ class JobStore:
             self._jobs[job.id] = job
 
         if self._jobs:
-            logger.info("ladattiin %d aiempaa jobia levyltä", len(self._jobs))
+            logger.info("loaded %d previous jobs from disk", len(self._jobs))
 
     # --- Retention --------------------------------------------------------
 
@@ -322,5 +322,5 @@ class JobStore:
             self._jobs.pop(job_id, None)
 
         if removed:
-            logger.info("retention poisti %d videota", len(removed))
+            logger.info("retention removed %d videos", len(removed))
         return len(removed)

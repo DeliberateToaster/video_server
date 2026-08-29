@@ -118,25 +118,25 @@ def resolve_params(request: GenerationRequest, profile: ModelProfile) -> Generat
     if resolution not in profile.resolutions:
         allowed = ", ".join(profile.resolutions)
         raise ParamError(
-            f"resolution {resolution!r} ei ole tuettu mallilla {profile.name}; sallitut: {allowed}"
+            f"resolution {resolution!r} is not supported by {profile.name}; allowed: {allowed}"
         )
     try:
         parse_resolution(resolution)
     except ValueError:
-        raise ParamError(f"resolution {resolution!r} ei ole muotoa LEVEYSxKORKEUS") from None
+        raise ParamError(f"resolution {resolution!r} is not of the form WIDTHxHEIGHT") from None
 
     num_frames = request.num_frames if request.num_frames is not None else DEFAULT_NUM_FRAMES
     if not profile.is_valid_frame_count(num_frames):
         lower, upper = profile.nearest_frame_counts(num_frames)
         raise ParamError(
-            f"num_frames {num_frames} ei kelpaa mallilla {profile.name}: vaaditaan "
-            f"n * {profile.frame_multiple} + 1. Lähimmät kelvolliset: {lower} ja {upper}"
+            f"num_frames {num_frames} is invalid for {profile.name}: requires "
+            f"n * {profile.frame_multiple} + 1. Nearest valid values: {lower} and {upper}"
         )
 
     init_image = getattr(request, "init_image", None)
     mode = "i2v" if init_image else "t2v"
     if not profile.supports_mode(mode):
-        raise ParamError(f"malli {profile.name} ei tue {mode}-generointia")
+        raise ParamError(f"model {profile.name} does not support {mode} generation")
 
     seed = request.seed if request.seed >= 0 else random.randrange(0, MAX_SEED + 1)
 

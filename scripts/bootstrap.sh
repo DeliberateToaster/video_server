@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Pystyttää WanFlashin tyhjältä koneelta yhdellä komennolla.
+# Sets up WanFlash on a clean machine with a single command.
 #
-# Asentaa uv:n jos se puuttuu, luo virtuaaliympäristön, asentaa riippuvuudet,
-# tarkistaa laitteiston ja kertoo miten palvelin käynnistetään. Python 3.12
-# asentuu uv:n mukana - erillistä Python-asennusta ei tarvita.
+# Installs uv if missing, creates the virtual environment, installs
+# dependencies, checks the hardware and prints how to start the server.
+# Python 3.12 comes with uv, so no separate Python install is needed.
 #
-# Skripti on idempotentti: sen voi ajaa uudelleen turvallisesti.
+# The script is idempotent: it is safe to run again.
 #
-# Käyttö:
-#   bash scripts/bootstrap.sh              # kaikki inferenssiin, ei painoja
-#   bash scripts/bootstrap.sh --weights    # myös painot (~32 GB)
-#   bash scripts/bootstrap.sh --minimal    # kevyt, ei GPU-riippuvuuksia
+# Usage:
+#   bash scripts/bootstrap.sh              # everything for inference, no weights
+#   bash scripts/bootstrap.sh --weights    # also the weights (~32 GB)
+#   bash scripts/bootstrap.sh --minimal    # light, no GPU dependencies
 
 set -euo pipefail
 
@@ -20,15 +20,15 @@ SKIP_TESTS=0
 MODEL_PROFILE="wan2.2-ti2v-5b"
 
 usage() {
-    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
     cat <<'USAGE'
 
-Valinnat:
-  --minimal          Vain rajapinnan riippuvuudet (~50 MB), ei torchia.
-  --weights          Lataa myös mallin painot (oletusmallilla ~32 GB).
-  --profile NIMI     Ladattava malliprofiili (oletus: wan2.2-ti2v-5b).
-  --skip-tests       Ohita asennuksen jälkeinen testiajo.
-  -h, --help         Tämä ohje.
+Options:
+  --minimal          API dependencies only (~50 MB), no torch.
+  --weights          Also download the model weights (~32 GB for the default).
+  --profile NAME     Model profile to download (default: wan2.2-ti2v-5b).
+  --skip-tests       Skip the test run after installation.
+  -h, --help         This help.
 USAGE
 }
 
@@ -39,11 +39,11 @@ while [ $# -gt 0 ]; do
         --skip-tests) SKIP_TESTS=1 ;;
         --profile)
             shift
-            [ $# -gt 0 ] || { echo "--profile vaatii arvon" >&2; exit 2; }
+            [ $# -gt 0 ] || { echo "--profile requires a value" >&2; exit 2; }
             MODEL_PROFILE="$1"
             ;;
         -h|--help) usage; exit 0 ;;
-        *) echo "tuntematon valitsin: $1" >&2; usage; exit 2 ;;
+        *) echo "unknown option: $1" >&2; usage; exit 2 ;;
     esac
     shift
 done
@@ -72,20 +72,20 @@ find_uv() {
 
 # --- 1. uv ----------------------------------------------------------------
 
-step "Tarkistetaan uv"
+step "Checking uv"
 if UV="$(find_uv)"; then
-    note "Löytyi: $UV"
+    note "Found: $UV"
 else
-    step "Asennetaan uv"
+    step "Installing uv"
     # Virallinen asennusskripti. Kerrotaan ääneen mitä ajetaan, koska
     # etäskriptin suorittaminen on asia josta käyttäjän kuuluu tietää.
-    note "Ajetaan virallinen asennusskripti: https://astral.sh/uv/install.sh"
+    note "Running the official installer script: https://astral.sh/uv/install.sh"
     curl -LsSf https://astral.sh/uv/install.sh | sh
     UV="$(find_uv)" || {
-        echo "uv:n asennus ei onnistunut. Asenna käsin: https://docs.astral.sh/uv/" >&2
+        echo "uv installation failed. Install it manually: https://docs.astral.sh/uv/" >&2
         exit 1
     }
-    note "Asennettu: $UV"
+    note "Installed: $UV"
 fi
 
 # Lisätään uv:n hakemisto tämän istunnon PATH:iin, jottei shelliä tarvitse
@@ -93,98 +93,98 @@ fi
 export PATH="$(dirname "$UV"):$PATH"
 "$UV" --version
 
-# --- 2. Riippuvuudet ------------------------------------------------------
+# --- 2. Dependencies ------------------------------------------------------
 
 if [ "$MINIMAL" -eq 0 ] && [ "$(uname -s)" = "Darwin" ]; then
     # GPU-extra hakee torchin CUDA-indeksistä, jossa ei ole macOS-wheelejä.
     # Selkeä viesti on parempi kuin resolverin virhe.
-    step "Huom: macOS"
-    note "GPU-riippuvuudet on rakennettu CUDA:lle (Linux/Windows)."
-    note "macOS:llä ei ole CUDAa, joten asennetaan kevyt versio."
-    note "Katso README, kohta Tunnetut rajoitteet."
+    step "Note: macOS"
+    note "The GPU dependencies are built for CUDA (Linux/Windows)."
+    note "macOS has no CUDA, so the light install is used instead."
+    note "See README, Known limitations."
     MINIMAL=1
 fi
 
 if [ "$MINIMAL" -eq 1 ]; then
-    step "Asennetaan rajapinnan riippuvuudet (kevyt, ei GPU:ta)"
+    step "Installing API dependencies (light, no GPU)"
     "$UV" sync --directory "$REPO_ROOT" --group dev
 else
-    step "Asennetaan riippuvuudet GPU-tuella (torch + diffusers, ~3 GB)"
-    note "Kevyempi vaihtoehto ilman GPU-riippuvuuksia: --minimal"
+    step "Installing dependencies with GPU support (torch + diffusers, ~3 GB)"
+    note "Lighter option without GPU dependencies: --minimal"
     "$UV" sync --directory "$REPO_ROOT" --extra gpu --group dev
 fi
 
-# --- 3. Konfiguraatio -----------------------------------------------------
+# --- 3. Configuration -----------------------------------------------------
 
 if [ ! -f "$REPO_ROOT/.env" ]; then
-    step "Luodaan .env"
+    step "Creating .env"
     cp "$REPO_ROOT/.env.example" "$REPO_ROOT/.env"
-    note "Kopioitu .env.example -> .env (oletukset toimivat sellaisenaan)"
+    note "Copied .env.example -> .env (the defaults work as they are)"
 else
-    step "Konfiguraatio"
-    note ".env on jo olemassa, ei ylikirjoiteta"
+    step "Configuration"
+    note ".env already exists, leaving it untouched"
 fi
 
-# --- 4. Laitteistotarkistus ----------------------------------------------
+# --- 4. Hardware check ----------------------------------------------------
 
-step "Tarkistetaan ympäristö"
+step "Checking the environment"
 # check_env palauttaa 1 jos kone kelpaa vain mock-ajoon. Se on tieto eikä
 # bootstrapin virhe, joten se ei saa kaataa skriptiä (set -e).
 ENV_STATUS=0
 "$UV" run --directory "$REPO_ROOT" python scripts/check_env.py || ENV_STATUS=$?
 
-# --- 5. Testit ------------------------------------------------------------
+# --- 5. Tests -------------------------------------------------------------
 
 if [ "$SKIP_TESTS" -eq 0 ]; then
-    step "Ajetaan testit (ei vaadi GPU:ta eikä painoja)"
+    step "Running tests (no GPU or weights required)"
     "$UV" run --directory "$REPO_ROOT" pytest -q
 fi
 
-# --- 6. Painot ------------------------------------------------------------
+# --- 6. Weights -----------------------------------------------------------
 
 if [ "$WEIGHTS" -eq 1 ]; then
-    step "Ladataan mallin painot: $MODEL_PROFILE"
-    note "Tämä on kymmeniä gigatavuja ja voi kestää kauan."
+    step "Downloading model weights: $MODEL_PROFILE"
+    note "This is tens of gigabytes and may take a long time."
     "$UV" run --directory "$REPO_ROOT" python scripts/download_model.py "$MODEL_PROFILE"
 fi
 
-# --- 7. Onko painot jo levyllä? -------------------------------------------
+# --- 7. Are the weights already on disk? ----------------------------------
 
 # Tarkistetaan tilanne sen sijaan että oletettaisiin: painot ovat voineet olla
 # levyllä jo ennen tätä ajoa, jolloin "lataa painot" -ohje olisi väärä.
 WEIGHTS_PRESENT=0
 if [ "$MINIMAL" -eq 0 ]; then
-    step "Tarkistetaan mallin painot"
+    step "Checking model weights"
     if "$UV" run --directory "$REPO_ROOT" python scripts/download_model.py --check "$MODEL_PROFILE"; then
         WEIGHTS_PRESENT=1
     fi
 fi
 
-# --- Yhteenveto -----------------------------------------------------------
+# --- Summary --------------------------------------------------------------
 
 printf '\n\033[32m======================================================\033[0m\n'
-printf '\033[32m Asennus valmis\033[0m\n'
+printf '\033[32m Installation complete\033[0m\n'
 printf '\033[32m======================================================\033[0m\n\n'
 
 if [ "$MINIMAL" -eq 1 ]; then
-    echo "Kevyt asennus: käytä mock-backendiä."
+    echo "Light install: use the mock backend."
     echo "  VIDEO_SERVER_BACKEND=mock uv run uvicorn video_server.main:app"
 elif [ "$WEIGHTS_PRESENT" -eq 0 ]; then
-    echo "Painoja ei ole vielä ladattu. Lataa ne ennen käynnistystä:"
+    echo "The weights are not downloaded yet. Fetch them before starting:"
     echo "  uv run python scripts/download_model.py $MODEL_PROFILE"
     echo
-    echo "Tai kokeile rajapintaa heti ilman painoja:"
+    echo "Or try the API right away without weights:"
     echo "  VIDEO_SERVER_BACKEND=mock uv run uvicorn video_server.main:app"
 else
-    echo "Käynnistä palvelin:"
+    echo "Start the server:"
     echo "  uv run uvicorn video_server.main:app"
     echo
-    echo "Malli latautuu taustalla; GET /api/v1/health kertoo koska se on valmis."
+    echo "The model loads in the background; GET /api/v1/health reports when it is ready."
 fi
 
 if [ "$ENV_STATUS" -ne 0 ] && [ "$MINIMAL" -eq 0 ]; then
-    printf '\n\033[33mHuom: ympäristötarkistus ei todennut konetta valmiiksi oikeaan\033[0m\n'
-    printf '\033[33minferenssiin. Katso yllä olevat merkinnät.\033[0m\n'
+    printf '\n\033[33mNote: the environment check did not find this machine ready for\033[0m\n'
+    printf '\033[33mreal inference. See the items flagged above.\033[0m\n'
 fi
 
-printf '\nDokumentaatio: README.md | Asetukset: .env | API: /docs\n\n'
+printf '\nDocs: README.md | Settings: .env | API: /docs\n\n'

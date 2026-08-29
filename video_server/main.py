@@ -62,7 +62,7 @@ def _require_ready(request: Request) -> None:
     if state.status != "ready":
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=state.detail or f"backend ei ole valmis (tila: {state.status})",
+            detail=state.detail or f"backend is not ready (state: {state.status})",
         )
 
 
@@ -92,7 +92,7 @@ def _require_mode(request: Request, mode: str) -> None:
     if not profile.supports_mode(mode):
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail=f"aktiivinen malli {profile.name} ei tue {mode}-generointia",
+            detail=f"active model {profile.name} does not support {mode} generation",
         )
 
 
@@ -133,7 +133,7 @@ def get_job(request: Request, job_id: str) -> JobResponse:
         return _to_response(_store(request).get(job_id))
     except KeyError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=f"tuntematon job {job_id}"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"unknown job {job_id}"
         ) from None
 
 
@@ -202,10 +202,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as exc:  # lataus epäonnistuu -> /health kertoo miksi
             state.status = "error"
             state.detail = f"{exc.__class__.__name__}: {exc}"
-            logger.exception("backendin lataus epäonnistui")
+            logger.exception("backend load failed")
         else:
             state.status = "ready"
-            logger.info("backend %s ladattu", backend.profile.name)
+            logger.info("backend %s loaded", backend.profile.name)
 
     load_task = asyncio.create_task(load_backend(), name="backend-load")
 
@@ -235,7 +235,7 @@ async def require_api_key(request: Request, call_next):
             # compare_digest: vakioaikainen vertailu, ei vuoda avainta ajastuksella.
             if not secrets.compare_digest(provided, key):
                 return Response(
-                    content="puuttuva tai virheellinen X-API-Key",
+                    content="missing or invalid X-API-Key",
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     media_type="text/plain; charset=utf-8",
                 )
@@ -250,7 +250,7 @@ async def limit_body_size(request: Request, call_next):
     length = request.headers.get("content-length")
     if length is not None and length.isdigit() and int(length) > max_bytes:
         return Response(
-            content=f"pyyntörunko on liian suuri (max {max_bytes} tavua)",
+            content=f"request body is too large (max {max_bytes} bytes)",
             status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             media_type="text/plain; charset=utf-8",
         )

@@ -52,7 +52,7 @@ class MockBackend(VideoBackend):
         output_path: Path,
     ) -> Path:
         if not self._loaded:
-            raise RuntimeError("MockBackend.load() kutsumatta")
+            raise RuntimeError("MockBackend.load() was not called")
 
         width, height = params.size
         hue = int(np.random.default_rng(params.seed).integers(0, 3))

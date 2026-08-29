@@ -3,9 +3,12 @@
 Ajo:  uv run python scripts/check_env.py
 
 Kertoo onko kone valmis oikeaan inferenssiin ja minkä VRAM-tierin se saisi.
-Tier-päättely tulee video_server.config-moduulista: sama logiikka jota
-palvelin käyttää käynnistyksessä, ei kopio. Skripti toimii myös ilman GPU-riippuvuuksia:
+Tier-päättely tulee video_server.config-moduulista: sama logiikka jota palvelin
+käyttää käynnistyksessä, ei kopio. Skripti toimii myös ilman GPU-riippuvuuksia:
 silloin se raportoi mitä puuttuu sen sijaan että kaatuisi.
+
+Tuloste on englanniksi, koska se on käyttäjälle näkyvää; kommentit ovat
+suomeksi kuten muuallakin koodissa.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import sys
 
 from video_server.config import GIB, suggest_tier
 
-# Windows-konsolin oletuskoodisivu ei ole UTF-8, ja raportissa on ääkkösiä.
+# Windows-konsolin oletuskoodisivu ei ole UTF-8.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -28,9 +31,7 @@ def _line(label: str, value: str) -> None:
 def check_python() -> bool:
     v = sys.version_info
     ok = (3, 11) <= (v.major, v.minor) < (3, 13)
-    _line(
-        "Python", f"{v.major}.{v.minor}.{v.micro}" + ("" if ok else "  <-- vaaditaan 3.11 tai 3.12")
-    )
+    _line("Python", f"{v.major}.{v.minor}.{v.micro}" + ("" if ok else "  <-- need 3.11 or 3.12"))
     return ok
 
 
@@ -43,11 +44,11 @@ def check_ffmpeg() -> bool:
             first = subprocess.run(
                 [system_ffmpeg, "-version"], capture_output=True, text=True, timeout=15, check=False
             ).stdout.splitlines()[0]
-            _line("ffmpeg (järjestelmä)", first)
+            _line("ffmpeg (system)", first)
         except (subprocess.SubprocessError, IndexError):
-            _line("ffmpeg (järjestelmä)", f"löytyi: {system_ffmpeg} (versio ei luettavissa)")
+            _line("ffmpeg (system)", f"found: {system_ffmpeg} (version unreadable)")
     else:
-        _line("ffmpeg (järjestelmä)", "ei löydy PATH:sta (ei pakollinen)")
+        _line("ffmpeg (system)", "not on PATH (optional)")
 
     try:
         import imageio_ffmpeg
@@ -55,7 +56,7 @@ def check_ffmpeg() -> bool:
         _line("imageio-ffmpeg", imageio_ffmpeg.get_ffmpeg_version())
         return True
     except Exception as exc:  # noqa: BLE001 - halutaan raportti, ei traceback
-        _line("imageio-ffmpeg", f"PUUTTUU ({exc.__class__.__name__}) - aja: uv sync")
+        _line("imageio-ffmpeg", f"MISSING ({exc.__class__.__name__}) - run: uv sync")
         return False
 
 
@@ -72,14 +73,14 @@ def check_torch() -> bool:
     try:
         import torch
     except ImportError:
-        _line("torch", "PUUTTUU - aja: uv sync --extra gpu")
+        _line("torch", "MISSING - run: uv sync --extra gpu")
         return False
 
     _line("torch", torch.__version__)
-    _line("CUDA (torch build)", torch.version.cuda or "ei CUDA-buildi")
+    _line("CUDA (torch build)", torch.version.cuda or "not a CUDA build")
 
     if not torch.cuda.is_available():
-        _line("CUDA saatavilla", "EI - tarkista ajuri ja että torch on CUDA-buildi")
+        _line("CUDA available", "NO - check the driver and that torch is a CUDA build")
         return False
 
     props = torch.cuda.get_device_properties(0)
@@ -87,17 +88,17 @@ def check_torch() -> bool:
     _line("GPU", props.name)
     _line("VRAM", f"{props.total_memory / GIB:.1f} GB")
     _line("Compute capability", f"sm_{props.major}{props.minor}")
-    _line("Järjestelmämuisti", "tuntematon" if ram is None else f"{ram:.1f} GB")
+    _line("System memory", "unknown" if ram is None else f"{ram:.1f} GB")
 
     # FP8-tensoriytimet vaativat sm_89 (Ada) tai uudemman. Amperella (sm_86)
     # FP8 on vain tallennusmuoto - VRAM-säästö on todellinen, nopeutus ei.
     fp8 = (props.major, props.minor) >= (8, 9)
-    _line("FP8-laskenta", "kyllä" if fp8 else "ei (Ampere tai vanhempi): FP8 vain tallennusmuotona")
+    _line("FP8 compute", "yes" if fp8 else "no (Ampere or older): FP8 is storage only")
 
     tier, reason = suggest_tier(props.total_memory / GIB, ram)
     print()
-    _line("Ehdotettu tier", tier)
-    _line("Perustelu", reason)
+    _line("Suggested tier", tier)
+    _line("Reason", reason)
 
     # Pieni todellinen laskutoimitus: varmistaa että kernelit ajavat, ei pelkkä
     # is_available()-lippu.
@@ -105,17 +106,17 @@ def check_torch() -> bool:
         x = torch.randn(512, 512, device="cuda", dtype=torch.bfloat16)
         torch.matmul(x, x)
         torch.cuda.synchronize()
-        _line("bf16-matmul GPU:lla", "OK")
+        _line("bf16 matmul on GPU", "OK")
     except Exception as exc:  # noqa: BLE001
-        _line("bf16-matmul GPU:lla", f"EPÄONNISTUI: {exc}")
+        _line("bf16 matmul on GPU", f"FAILED: {exc}")
         return False
 
     return tier != "unsupported"
 
 
 def main() -> int:
-    print("\nWanFlash: ympäristön tarkistus\n" + "=" * 42)
-    print("\nPerusympäristö")
+    print("\nWanFlash: environment check\n" + "=" * 42)
+    print("\nBase environment")
     ok_py = check_python()
     ok_ff = check_ffmpeg()
     print("\nGPU")
@@ -123,13 +124,13 @@ def main() -> int:
 
     print("\n" + "=" * 42)
     if ok_py and ok_ff and ok_gpu:
-        print("Valmis oikeaan inferenssiin (Vaihe 2).\n")
+        print("Ready for real inference.\n")
         return 0
     if ok_py and ok_ff:
-        print("Valmis mock-backendiin ja rajapintakehitykseen (Vaihe 1).")
-        print("Oikea inferenssi vaatii yllä merkityt korjaukset.\n")
+        print("Ready for the mock backend and API development.")
+        print("Real inference needs the items flagged above.\n")
         return 1
-    print("Perusympäristö on puutteellinen; korjaa yllä merkityt kohdat.\n")
+    print("Base environment is incomplete; fix the items flagged above.\n")
     return 2
 
 

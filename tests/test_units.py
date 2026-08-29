@@ -126,12 +126,12 @@ def test_tier_mid_for_3090_and_notes_offload_is_impossible() -> None:
     mahdu, ja perustelun on sanottava se ääneen."""
     tier, reason = suggest_tier(24.0, 32.0)
     assert tier == "mid"
-    assert "offload ei onnistu" in reason
+    assert "offload will not fit" in reason
 
 
 def test_tier_mid_allows_offload_with_enough_ram() -> None:
     _, reason = suggest_tier(24.0, 64.0)
-    assert "offload-tilassa" in reason
+    assert "with offload" in reason
 
 
 def test_tier_low_for_small_card() -> None:

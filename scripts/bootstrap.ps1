@@ -1,40 +1,40 @@
 ﻿<#
 .SYNOPSIS
-    Pystyttää WanFlashin tyhjältä koneelta yhdellä komennolla.
+    Sets up WanFlash on a clean machine with a single command.
 
 .DESCRIPTION
-    Asentaa uv:n jos se puuttuu, luo virtuaaliympäristön, asentaa riippuvuudet,
-    tarkistaa laitteiston ja kertoo miten palvelin käynnistetään.
+    Installs uv if missing, creates the virtual environment, installs
+    dependencies, checks the hardware and prints how to start the server.
 
-    Python 3.12 asentuu uv:n mukana - erillistä Python-asennusta ei tarvita.
+    Python 3.12 comes with uv, so no separate Python install is needed.
 
-    Skripti on idempotentti: sen voi ajaa uudelleen turvallisesti.
+    The script is idempotent: it is safe to run again.
 
 .PARAMETER Minimal
-    Asenna vain rajapinnan riippuvuudet (~50 MB) ilman torchia ja diffusersia.
-    Tällä ajetaan mock-backend ja testit, ei oikeaa inferenssiä.
+    Install only the API dependencies (~50 MB) without torch and diffusers.
+    Enough for the mock backend and the test suite, not for real inference.
 
 .PARAMETER Weights
-    Lataa myös mallin painot. Oletusmallilla tämä on ~32 GB, joten se ei
-    tapahdu ilman tätä valintaa.
+    Also download the model weights. For the default model this is ~32 GB,
+    so it never happens without this switch.
 
 .PARAMETER ModelProfile
-    Ladattava malliprofiili, kun -Weights on annettu.
+    Which model profile to download when -Weights is given.
 
 .PARAMETER SkipTests
-    Ohita asennuksen jälkeinen testiajo.
+    Skip the test run after installation.
 
 .EXAMPLE
     .\scripts\bootstrap.ps1
-    Asentaa kaiken inferenssiin tarvittavan, ei painoja.
+    Installs everything needed for inference, without the weights.
 
 .EXAMPLE
     .\scripts\bootstrap.ps1 -Weights
-    Asentaa kaiken ja lataa painot (~32 GB).
+    Installs everything and downloads the weights (~32 GB).
 
 .EXAMPLE
     .\scripts\bootstrap.ps1 -Minimal
-    Kevyt asennus rajapintakehitykseen, ei GPU-riippuvuuksia.
+    Light install for API development, no GPU dependencies.
 #>
 [CmdletBinding()]
 param(
@@ -109,39 +109,39 @@ function Find-Uv {
 }
 
 function Install-Uv {
-    Write-Step "Asennetaan uv"
+    Write-Step "Installing uv"
 
     if (Get-Command winget -ErrorAction SilentlyContinue) {
-        Write-Note "Lähde: winget (astral-sh.uv)"
+        Write-Note "Source: winget (astral-sh.uv)"
         $code = Invoke-Native winget install --id astral-sh.uv -e --source winget `
             --accept-package-agreements --accept-source-agreements --disable-interactivity
-        if ($code -ne 0) { Write-Note "winget palautti koodin $code, tarkistetaan silti" }
+        if ($code -ne 0) { Write-Note "winget returned $code, checking anyway" }
     }
     else {
         # Virallinen asennusskripti. Kerrotaan ääneen mitä ajetaan, koska
         # etäskriptin suorittaminen on asia josta käyttäjän kuuluu tietää.
-        Write-Note "winget puuttuu, käytetään virallista asennusskriptiä:"
+        Write-Note "winget not found, using the official installer script:"
         Write-Note "  https://astral.sh/uv/install.ps1"
         Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
     }
 
     $found = Find-Uv
     if (-not $found) {
-        throw "uv:n asennus ei onnistunut. Asenna se käsin: https://docs.astral.sh/uv/"
+        throw "uv installation failed. Install it manually: https://docs.astral.sh/uv/"
     }
     return $found
 }
 
 # --- 1. uv ----------------------------------------------------------------
 
-Write-Step "Tarkistetaan uv"
+Write-Step "Checking uv"
 $Uv = Find-Uv
 if ($Uv) {
-    Write-Note "Löytyi: $Uv"
+    Write-Note "Found: $Uv"
 }
 else {
     $Uv = Install-Uv
-    Write-Note "Asennettu: $Uv"
+    Write-Note "Installed: $Uv"
 }
 
 # Lisätään uv:n hakemisto tämän istunnon PATH:iin, jotta myöhemmät komennot
@@ -153,102 +153,102 @@ if ($env:PATH -notlike "*$UvDir*") {
 
 $null = Invoke-Native $Uv --version
 
-# --- 2. Riippuvuudet ------------------------------------------------------
+# --- 2. Dependencies ------------------------------------------------------
 
 if ($Minimal) {
-    Write-Step "Asennetaan rajapinnan riippuvuudet (kevyt, ei GPU:ta)"
+    Write-Step "Installing API dependencies (light, no GPU)"
     $code = Invoke-Native $Uv sync --directory $RepoRoot --group dev
 }
 else {
-    Write-Step "Asennetaan riippuvuudet GPU-tuella (torch + diffusers, ~3 GB)"
-    Write-Note "Kevyempi vaihtoehto ilman GPU-riippuvuuksia: -Minimal"
+    Write-Step "Installing dependencies with GPU support (torch + diffusers, ~3 GB)"
+    Write-Note "Lighter option without GPU dependencies: -Minimal"
     $code = Invoke-Native $Uv sync --directory $RepoRoot --extra gpu --group dev
 }
-if ($code -ne 0) { throw "riippuvuuksien asennus epäonnistui (koodi $code)" }
+if ($code -ne 0) { throw "dependency installation failed (exit code $code)" }
 
-# --- 3. Konfiguraatio -----------------------------------------------------
+# --- 3. Configuration -----------------------------------------------------
 
 $EnvFile = Join-Path $RepoRoot ".env"
 $EnvExample = Join-Path $RepoRoot ".env.example"
 if (-not (Test-Path $EnvFile)) {
-    Write-Step "Luodaan .env"
+    Write-Step "Creating .env"
     Copy-Item $EnvExample $EnvFile
-    Write-Note "Kopioitu .env.example -> .env (oletukset toimivat sellaisenaan)"
+    Write-Note "Copied .env.example -> .env (the defaults work as they are)"
 }
 else {
-    Write-Step "Konfiguraatio"
-    Write-Note ".env on jo olemassa, ei ylikirjoiteta"
+    Write-Step "Configuration"
+    Write-Note ".env already exists, leaving it untouched"
 }
 
-# --- 4. Laitteistotarkistus ----------------------------------------------
+# --- 4. Hardware check ----------------------------------------------------
 
-Write-Step "Tarkistetaan ympäristö"
+Write-Step "Checking the environment"
 # check_env palauttaa 1 jos kone kelpaa vain mock-ajoon. Se ei ole
 # bootstrapin virhe vaan tieto, joten sitä ei käsitellä kaatumisena.
 $EnvStatus = Invoke-Native $Uv run --directory $RepoRoot python scripts/check_env.py
 
-# --- 5. Testit ------------------------------------------------------------
+# --- 5. Tests -------------------------------------------------------------
 
 if (-not $SkipTests) {
-    Write-Step "Ajetaan testit (ei vaadi GPU:ta eikä painoja)"
+    Write-Step "Running tests (no GPU or weights required)"
     $code = Invoke-Native $Uv run --directory $RepoRoot pytest -q
-    if ($code -ne 0) { throw "testit epäonnistuivat - asennus ei ole kunnossa" }
+    if ($code -ne 0) { throw "tests failed - the installation is not sound" }
 }
 
-# --- 6. Painot ------------------------------------------------------------
+# --- 6. Weights -----------------------------------------------------------
 
 if ($Weights) {
-    Write-Step "Ladataan mallin painot: $ModelProfile"
-    Write-Note "Tämä on kymmeniä gigatavuja ja voi kestää kauan."
+    Write-Step "Downloading model weights: $ModelProfile"
+    Write-Note "This is tens of gigabytes and may take a long time."
     $code = Invoke-Native $Uv run --directory $RepoRoot python scripts/download_model.py $ModelProfile
-    if ($code -ne 0) { throw "painojen lataus epäonnistui (koodi $code)" }
+    if ($code -ne 0) { throw "weight download failed (exit code $code)" }
 }
 
-# --- 7. Onko painot jo levyllä? -------------------------------------------
+# --- 7. Are the weights already on disk? ----------------------------------
 
 # Tarkistetaan tilanne sen sijaan että oletettaisiin. Painot ovat voineet olla
 # levyllä jo ennen tätä ajoa, jolloin "lataa painot" -ohje olisi väärä.
 $WeightsPresent = $false
 if (-not $Minimal) {
-    Write-Step "Tarkistetaan mallin painot"
+    Write-Step "Checking model weights"
     $WeightsPresent = (Invoke-Native $Uv run --directory $RepoRoot `
             python scripts/download_model.py --check $ModelProfile) -eq 0
 }
 
-# --- Yhteenveto -----------------------------------------------------------
+# --- Summary --------------------------------------------------------------
 
 Write-Host ""
 Write-Host "======================================================" -ForegroundColor Green
-Write-Host " Asennus valmis" -ForegroundColor Green
+Write-Host " Installation complete" -ForegroundColor Green
 Write-Host "======================================================" -ForegroundColor Green
 Write-Host ""
 
 if ($Minimal) {
-    Write-Host "Kevyt asennus: käytä mock-backendiä." -ForegroundColor Yellow
+    Write-Host "Light install: use the mock backend." -ForegroundColor Yellow
     Write-Host '  $env:VIDEO_SERVER_BACKEND = "mock"'
     Write-Host "  uv run uvicorn video_server.main:app"
 }
 elseif (-not $WeightsPresent) {
-    Write-Host "Painoja ei ole vielä ladattu. Lataa ne ennen käynnistystä:"
+    Write-Host "The weights are not downloaded yet. Fetch them before starting:"
     Write-Host "  uv run python scripts/download_model.py $ModelProfile"
     Write-Host ""
-    Write-Host "Tai kokeile rajapintaa heti ilman painoja:"
+    Write-Host "Or try the API right away without weights:"
     Write-Host '  $env:VIDEO_SERVER_BACKEND = "mock"'
     Write-Host "  uv run uvicorn video_server.main:app"
 }
 else {
-    Write-Host "Käynnistä palvelin:"
+    Write-Host "Start the server:"
     Write-Host "  uv run uvicorn video_server.main:app"
     Write-Host ""
-    Write-Host "Malli latautuu taustalla; GET /api/v1/health kertoo koska se on valmis."
+    Write-Host "The model loads in the background; GET /api/v1/health reports when it is ready."
 }
 
 if ($EnvStatus -ne 0 -and -not $Minimal) {
     Write-Host ""
-    Write-Host "Huom: ympäristötarkistus ei todennut konetta valmiiksi oikeaan" -ForegroundColor Yellow
-    Write-Host "inferenssiin. Katso yllä olevat merkinnät." -ForegroundColor Yellow
+    Write-Host "Note: the environment check did not find this machine ready for" -ForegroundColor Yellow
+    Write-Host "real inference. See the items flagged above." -ForegroundColor Yellow
 }
 
 Write-Host ""
-Write-Host "Dokumentaatio: README.md | Asetukset: .env | API: /docs"
+Write-Host "Docs: README.md | Settings: .env | API: /docs"
 Write-Host ""

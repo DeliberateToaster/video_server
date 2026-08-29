@@ -56,5 +56,5 @@ def create(settings: Settings) -> VideoBackend:
         factory = _REGISTRY[name]
     except KeyError:
         known = ", ".join(available())
-        raise ValueError(f"tuntematon backend {name!r}; rekisteröidyt: {known}") from None
+        raise ValueError(f"unknown backend {name!r}; registered: {known}") from None
     return factory(settings)

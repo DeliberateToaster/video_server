@@ -122,8 +122,8 @@ class Settings(BaseSettings):
         policy = TIERS.get(tier)
         if policy is None:
             raise ValueError(
-                f"backend=auto ei osaa valita mallia tierille {tier!r} ({reason}). "
-                f"Aseta VIDEO_SERVER_BACKEND eksplisiittisesti; kehityksessä "
+                f"backend=auto cannot pick a model for tier {tier!r} ({reason}). "
+                f"Set VIDEO_SERVER_BACKEND explicitly; for development use "
                 f"VIDEO_SERVER_BACKEND=mock."
             )
         return policy.profile
@@ -135,14 +135,14 @@ class Settings(BaseSettings):
         Perustelu logitetaan, jottei valinta ole hiljainen.
         """
         if self.cpu_offload is True:
-            return "offload", "asetettu eksplisiittisesti (cpu_offload=true)"
+            return "offload", "set explicitly (cpu_offload=true)"
         if self.cpu_offload is False:
-            return "bf16", "asetettu eksplisiittisesti (cpu_offload=false)"
+            return "bf16", "set explicitly (cpu_offload=false)"
 
         tier, reason = self.resolve_tier()
         policy = TIERS.get(tier)
         if policy is None:
-            return "bf16", f"tierille {tier!r} ei ole politiikkaa ({reason})"
+            return "bf16", f"no policy defined for tier {tier!r} ({reason})"
         return policy.load_mode, f"tier {tier}: {policy.note}"
 
     def profile(self) -> ModelProfile:
@@ -174,15 +174,15 @@ class Settings(BaseSettings):
         GPU-riippuvuuksia.
         """
         if self.tier != "auto":
-            return self.tier, "asetettu eksplisiittisesti konfiguraatiossa"
+            return self.tier, "set explicitly in configuration"
 
         try:
             import torch
         except ImportError:
-            return "cpu", "torch puuttuu - GPU-riippuvuuksia ei ole asennettu"
+            return "cpu", "torch missing - GPU dependencies are not installed"
 
         if not torch.cuda.is_available():
-            return "cpu", "CUDA ei ole käytettävissä"
+            return "cpu", "CUDA is not available"
 
         index = int(self.device.split(":")[1]) if ":" in self.device else 0
         props = torch.cuda.get_device_properties(index)
